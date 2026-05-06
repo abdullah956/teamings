@@ -450,3 +450,38 @@ provider marketing is leaving a gap that empirical measurement
 fills.
 
 Source: latency_ms column in results/run_20260506_131155.csv.
+
+
+## Open-weight models != free, frictionless inference
+
+I assumed "open weights = I can run them via HF API for free."
+Reality in 2026: HF restructured Inference Providers, and serving
+now requires a specific token scope ("Make calls to Inference
+Providers") that older Hub-read tokens do not have by default. My
+existing token returned 403 on every model I tried — Qwen2.5-7B,
+Llama-3.2-3B, Qwen2.5-1.5B, zephyr-7b-beta, Mistral-7B-v0.3 — all
+status 403, all in 250–525ms. Uniform failure across model sizes
+and families confirms this is an authentication scope problem, not
+a per-model availability problem. The probe script
+(scripts/probe_hf_models.py) was written specifically to make this
+diagnosis fast: 4 candidate calls, ~1.3s wall-clock, unambiguous
+output.
+
+This is a recurring pattern in the AI ecosystem: "free open" is
+infrastructure-gated even when the weights themselves are public.
+The model is open; the inference endpoint is a separate scope-gated
+service. The friction here is the kind of thing that makes people
+give up on open models and fall back to OpenAI for prototypes —
+which is a self-fulfilling prophecy for the "everyone uses GPT"
+status quo.
+
+Implications for Project 2: I cannot rely on HF Inference Providers
+for evaluating my own fine-tuned model. I'll need local GPU
+(Colab) for that step. This affects the architecture of the eval
+pipeline — `LocalTarget` (currently a placeholder) becomes the
+load-bearing adapter rather than a future nice-to-have.
+
+Source: scripts/probe_hf_models.py output (committed in 703ee50);
+HFInferenceTarget retry policy in targets/hf_inference_target.py;
+results/run_20260506_130730.csv has 60 rows of the same 403 from
+the original run that triggered this investigation.
