@@ -687,3 +687,43 @@ results/repro_judge_contradiction_20260506_145646.csv (this repro
 run, 10 rows, both targets, n=5);
 scripts/repro_judge_contradiction.py (the reproducer);
 judge/llm_judge.py:280 (temperature=0 confirmed in the judge call).
+
+
+## Always check the denominator before celebrating the numerator
+
+While building the human-ground-truth pipeline, I ran the
+"both-judges-disagreed-with-human" spot-check script before any
+human verdicts were filled in. The script returned 0 — and on a
+quick read that looked like a clean finding ("our judges have
+complete coverage between them, no row escaped both methodologies").
+It wasn't. The denominator was 0 too. The filter (rows where
+``human_verdict`` is set AND disagrees with both judges) silently
+treats "no judgment yet" the same as "judgment matches at least
+one judge." Both produce a count of zero with no warning.
+
+The catch happened because I printed total/judged/unjudged counts
+right after the suspicious zero. As soon as the totals showed
+"Judged: 0", the spot-check result became unreadable rather than
+meaningful. Without that second query I would have reported "0
+both-miss cases" as a real coverage result.
+
+Two things to internalize:
+
+* Any aggregate metric is meaningless without its denominator.
+  Lead with N, not with the rate. A 0% miss rate over 0 cases is
+  the same number as a 0% miss rate over 1000 cases on the page,
+  but the load-bearing claims are wildly different.
+* Empty-set defaults are dangerous. ``sum(condition for x in []) == 0``
+  is a true statement that conveys nothing. Filters that count
+  matches over a possibly-empty population should print the
+  population size on every run, not just when something matches.
+
+Concrete fix for the eval scripts: ``judge_accuracy_report.py``
+already prints the sample size before the per-judge stats. The
+ad-hoc spot-check one-liner did not, which is how the bug landed.
+Future eval helpers should print N first, every time, even when
+it costs an extra line.
+
+Source: noticed during the prompt 1.7b ground-truth setup;
+applies to scripts/judge_accuracy_report.py and any future ad-hoc
+filter-and-count snippets.
