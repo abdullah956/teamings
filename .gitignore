@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project: red-team run outputs (keep the directory via .gitkeep)
+results/*
+!results/.gitkeep
