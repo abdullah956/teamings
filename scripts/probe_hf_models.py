@@ -24,11 +24,19 @@ from huggingface_hub.errors import HfHubHTTPError
 
 # Priority order: smaller / more broadly served first. The first one
 # that returns a successful completion wins.
+#
+# These are the slugs visible in the user's HF Inference Providers
+# catalog at https://router.huggingface.co/v1/models. Earlier versions
+# of this list contained slugs that are NOT in the routed catalog
+# (Llama-3.2-3B, Qwen2.5-1.5B, zephyr-7b-beta, Mistral-7B-v0.3); those
+# all returned 400 model_not_supported even with the Inference
+# Providers token scope. The lesson: scope alone isn't enough — the
+# specific model has to be routed by at least one provider you have
+# enabled. Keep this list synced with what /v1/models reports.
 CANDIDATES = [
-    "meta-llama/Llama-3.2-3B-Instruct",
-    "Qwen/Qwen2.5-1.5B-Instruct",
-    "HuggingFaceH4/zephyr-7b-beta",
-    "mistralai/Mistral-7B-Instruct-v0.3",
+    "Qwen/Qwen2.5-7B-Instruct",
+    "meta-llama/Llama-3.1-8B-Instruct",
+    "meta-llama/Llama-3.2-1B-Instruct",
 ]
 
 
