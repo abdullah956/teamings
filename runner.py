@@ -29,6 +29,11 @@ REQUIRED_FIELDS = (
 )
 ALLOWED_SEVERITY = {"low", "med", "high"}
 
+# Attack ids matching these prefixes are documentation/examples and
+# are excluded from runs. The numbered files (01_..., 02_..., etc.)
+# are the real suite.
+EXAMPLE_ID_PREFIXES = ("pi_example", "pi-canary")
+
 
 def load_attacks(attacks_dir: Path, categories: list[str], console: Console) -> list[dict]:
     """Walk attacks_dir, validate each YAML, compile regexes, return clean list.
@@ -64,6 +69,9 @@ def load_attacks(attacks_dir: Path, categories: list[str], console: Console) -> 
         missing = [f for f in REQUIRED_FIELDS if f not in attack]
         if missing:
             console.print(f"[yellow]skip {path}: missing fields: {missing}[/yellow]")
+            continue
+
+        if isinstance(attack.get("id"), str) and attack["id"].startswith(EXAMPLE_ID_PREFIXES):
             continue
 
         if attack["severity"] not in ALLOWED_SEVERITY:
