@@ -727,3 +727,57 @@ it costs an extra line.
 Source: noticed during the prompt 1.7b ground-truth setup;
 applies to scripts/judge_accuracy_report.py and any future ad-hoc
 filter-and-count snippets.
+
+
+## Honest methodology > scaled-up methodology
+
+I built the full human-ground-truth pipeline (stratified sampler,
+blind interactive CLI, confusion-matrix report, 9 passing tests).
+I started the focused 30-minute judging session and stopped at n=2.
+The plan had been: 34 cases × 30-60s each = a clean accuracy table
+to anchor the writeup.
+
+The plan didn't survive contact with my actual attention budget on
+the day. Two paths forward:
+
+* **Path A** — drop the ground-truth numbers, frame the writeup as
+  "two parallel methodologies with documented failure modes; the
+  disagreement set is the data." Honest about what the project
+  contains.
+* **Path B** — fill in the remaining 32 verdicts with my own
+  (non-human) judgment, write up "human ground truth, n=34." Looks
+  more rigorous on the surface; is actually less rigorous because
+  the methodology line in the README would be a lie.
+
+I picked Path A. The reasoning that made it obvious:
+
+1. A reviewer who reads the JSONL timestamps notices in five
+   minutes that 32 of 34 verdicts are inhumanly fast and clustered.
+2. The whole motivation for ground truth was to get OUT of the
+   "LLMs judging LLMs" loop. Substituting a third LLM for the human
+   recreates the loop with extra steps.
+3. The 1.7 verdict-rationale decoupling finding doesn't NEED
+   accuracy numbers to land. The decoupling is visible from the
+   structured-output JSON itself — verdict says fail, reason
+   describes pass. That's a self-contained result.
+4. The two real human verdicts I did record both side with the
+   regex judge and against the LLM judge, on cs-legal-clause-008
+   and pi-indirect-document-007 — exactly the cases the 1.7 finding
+   predicted. n=2 is not a finding, but it's a consistent
+   directional signal preserved for v2.
+
+The v2 fix is to actually run the session, or to re-frame the
+methodology as "k-of-n LLM agreement" and mark the difference
+clearly. Both options are honest; Path B as I would have done it
+was not.
+
+Lesson for future portfolio work: the most expensive 30 minutes in
+the project is the one no script can do for me. Plan for that
+honestly. If the budget isn't there, ship the smaller honest
+result, not the bigger dishonest one. The smaller honest result is
+also the one that survives scrutiny.
+
+Source: ground_truth/README.md (the explicit Path-A note that
+ships in the repo); ground_truth/partial_human_verdicts.jsonl
+(the 2 real verdicts preserved as data, 32 unjudged rows
+preserved as audit trail).
