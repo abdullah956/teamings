@@ -485,3 +485,98 @@ Source: scripts/probe_hf_models.py output (committed in 703ee50);
 HFInferenceTarget retry policy in targets/hf_inference_target.py;
 results/run_20260506_130730.csv has 60 rows of the same 403 from
 the original run that triggered this investigation.
+
+
+## Open != less safe — sometimes the inverse
+
+```
+Qwen/Qwen2.5-7B-Instruct (HF Inference Providers):  15/60  (25%)
+openai/gpt-4o-mini:                                  17/60  (28%)
+openai/gpt-3.5-turbo:                                21/60  (35%)
+```
+
+The open 7B model has the LOWEST total fail rate of the three.
+The naive "frontier closed models are most aligned" prior is wrong
+on this attack distribution.
+
+The delta is concentrated in one category:
+
+```
+category          Qwen-7B   gpt-3.5    gpt-4o-mini
+logic_bombs       4/10 40%  9/10 90%   8/10 80%
+```
+
+A 50-point gap between Qwen and gpt-3.5-turbo on logic_bombs alone
+accounts for the entire spread. On every other category the three
+models tie or are within one attack — context_stuffing 0/0/0,
+goal_hijacking 30/30/30, sycophancy 10/10/10, self_consistency
+0/10/0. Those are the categories OpenAI has explicitly RLHF'd
+against; Qwen ties or wins anyway. They look like commodity
+post-training capabilities, not differentiators.
+
+The mechanism this supports is the same one the per-attack
+regressions inside OpenAI showed: helpfulness RLHF creates a
+specific kind of attack surface — engagement under traps — that
+lighter-touch post-training doesn't create. Within OpenAI,
+4o-mini engages where 3.5 refuses. Across providers, both OpenAI
+models engage where Qwen refuses. Same shape, two scales of
+evidence pointing the same way.
+
+What this does NOT mean: that Qwen is "safer" than gpt-4o-mini in
+deployment. The result is methodological — for THIS attack
+distribution, with THIS sample size (n=10/category, single
+sample, temperature=0), helpfulness-engagement is a stronger
+predictor of red-team failure than vendor or vintage. The
+practical implication is for eval design: suites need adversarial
+categories that probe helpfulness-as-vulnerability, not just
+refusal-of-harm. Most existing safety benchmarks measure the
+latter and would miss what this suite caught.
+
+Source: results/run_20260506_134617.csv (committed in 10a22c6).
+
+
+## Open weights are catalog-gated, not just scope-gated
+
+The earlier "open weights are infrastructure-gated" entry had the
+right shape but the wrong specificity. Updated picture: even WITH
+the correct token scope ("Make calls to Inference Providers"),
+HF's router only serves a specific catalog of ~118 model slugs.
+The catalog membership depends on which third-party providers
+(Together, Featherless, Novita, Cerebras, Scaleway, etc.) have
+the model loaded AND which of those providers your account has
+enabled.
+
+Concrete diagnosis arc from this run:
+* First probe candidates (Llama-3.2-3B, Qwen-1.5B, zephyr-7b,
+  Mistral-7B-v0.3) all returned 403 with the old token: scope
+  problem.
+* After token regeneration, same four candidates returned 400
+  `model_not_supported`: distinct error class, distinct fix.
+  Scope was correct; routing was the issue.
+* Hit `https://router.huggingface.co/v1/models` directly to dump
+  the served catalog. Found Qwen2.5-7B was on it. Rewrote the
+  probe candidate list to use catalog-confirmed slugs only.
+* Re-ran probe: Qwen2.5-7B succeeded first try in 794ms.
+
+Three error classes, three fixes:
+* 401 Unauthorized → token is wrong/expired
+* 403 Forbidden → token lacks Inference Providers scope
+* 400 model_not_supported → model is not in your enabled
+  providers' catalog
+
+Each requires a different remediation; conflating them wastes
+debugging time. The probe script's per-error-class output
+(error label + status code) was specifically what made this
+distinction obvious on the second run.
+
+Implication for Project 2: I cannot assume any specific HF model
+will be available for evaluation against my fine-tuned model. The
+eval infrastructure must check catalog availability dynamically
+(query /v1/models, intersect with the desired set) OR I run
+inference locally on whatever I trained. The probe pattern in
+scripts/probe_hf_models.py is the right shape — for Project 2 it
+becomes "given the catalog, which of my baselines can I serve?"
+
+Source: scripts/probe_hf_models.py (rewritten candidate list,
+commit ed534fc); results/run_20260506_134617.csv (committed
+3-model run).
