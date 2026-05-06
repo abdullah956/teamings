@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 import re
 import sys
 import time
@@ -14,6 +15,7 @@ from rich.table import Table
 
 from judge.consistency import judge_consistency
 from judge.rule_based import judge as rule_judge
+from targets.hf_inference_target import HFInferenceTarget, _MissingHFTokenError
 from targets.openai_target import OpenAITarget
 
 logger = logging.getLogger(__name__)
@@ -123,23 +125,65 @@ def load_attacks(attacks_dir: Path, categories: list[str], console: Console) -> 
     return attacks
 
 
-def build_target_registry(target_names: list[str]):
+# Per-call cost estimates in USD. Used by --cost-estimate. These are
+# intentionally rough averages; the real cost depends on prompt and
+# response token counts. The point is to give the user a sense of
+# magnitude before launching a big run.
+COST_PER_CALL = {
+    "openai-mini": 0.0001,
+    "openai-35": 0.0001,
+    "hf-qwen": 0.0,
+}
+
+
+def _factory_openai_mini():
+    return OpenAITarget.gpt4o_mini()
+
+
+def _factory_openai_35():
+    return OpenAITarget.gpt35_turbo()
+
+
+def _factory_hf_qwen():
+    return HFInferenceTarget()
+
+
+# Each entry: alias -> (factory, required_env_var_or_None)
+TARGET_FACTORIES = {
+    "openai-mini": (_factory_openai_mini, "OPENAI_API_KEY"),
+    "openai-35": (_factory_openai_35, "OPENAI_API_KEY"),
+    "hf-qwen": (_factory_hf_qwen, "HF_TOKEN"),
+    # Backwards-compat alias from prompts 1.1–1.5.
+    "openai": (_factory_openai_mini, "OPENAI_API_KEY"),
+}
+
+
+def build_target_registry(target_names: list[str], console: Console):
     """Map a CLI target name to a Target instance.
 
-    Anthropic and HF are deferred until Prompt 1.6 — surface a clear error.
+    If a target's required env var is missing OR the factory itself raises
+    a missing-credential error, SKIP that target with a warning instead of
+    crashing. That way `--targets openai-mini,hf-qwen` still produces a
+    one-column run when HF_TOKEN isn't set.
     """
-    registry = {}
+    registry: dict[str, "OpenAITarget | HFInferenceTarget"] = {}
     for name in target_names:
         n = name.strip().lower()
-        if n == "openai":
-            registry[n] = OpenAITarget()
-        elif n in ("anthropic", "hf"):
+        if n not in TARGET_FACTORIES:
             raise ValueError(
-                f"target {n!r} is not implemented yet — wait for Prompt 1.6. "
-                f"Available targets right now: openai"
+                f"unknown target: {n!r}. Available: {sorted(TARGET_FACTORIES)}"
             )
-        else:
-            raise ValueError(f"unknown target: {n!r}. Available: openai")
+        factory, required_env = TARGET_FACTORIES[n]
+        if required_env and not os.environ.get(required_env):
+            console.print(
+                f"[yellow][WARN] {required_env} missing, skipping {n}[/yellow]"
+            )
+            continue
+        try:
+            registry[n] = factory()
+        except _MissingHFTokenError:
+            console.print(f"[yellow][WARN] HF_TOKEN missing, skipping {n}[/yellow]")
+            continue
     return registry
 
 
@@ -242,6 +286,11 @@ def main() -> int:
     parser.add_argument("--output", default=None)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--verbose", "-v", action="store_true")
+    parser.add_argument(
+        "--cost-estimate",
+        action="store_true",
+        help="Print an estimated cost for the planned run and prompt before continuing.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -255,10 +304,14 @@ def main() -> int:
     categories = [c.strip() for c in args.categories.split(",") if c.strip()]
 
     try:
-        registry = build_target_registry(target_names)
+        registry = build_target_registry(target_names, console)
     except ValueError as e:
         console.print(f"[red]{e}[/red]")
         return 2
+
+    if not registry:
+        console.print("[red]no targets available — nothing to do[/red]")
+        return 1
 
     attacks_dir = Path(args.attacks_dir)
     attacks = load_attacks(attacks_dir, categories, console)
@@ -269,7 +322,33 @@ def main() -> int:
     if args.limit is not None:
         attacks = attacks[: args.limit]
 
+    if args.cost_estimate:
+        n_attacks = len(attacks)
+        total_cost = 0.0
+        console.print()
+        console.print("[bold]Estimated cost for this run[/bold]")
+        for alias in registry.keys():
+            per = COST_PER_CALL.get(alias, 0.0)
+            sub = per * n_attacks
+            total_cost += sub
+            note = " (free, rate-limited)" if per == 0.0 else ""
+            console.print(
+                f"  {alias}: {n_attacks} calls × ${per:.4f}{note} = ${sub:.4f}"
+            )
+        console.print(
+            f"  [bold]TOTAL: {n_attacks} attacks × {len(registry)} targets "
+            f"= {n_attacks * len(registry)} calls, est. ${total_cost:.4f}[/bold]"
+        )
+        try:
+            answer = input("continue? [y/N] ").strip().lower()
+        except EOFError:
+            answer = ""
+        if answer != "y":
+            console.print("[yellow]aborted by user[/yellow]")
+            return 0
+
     pairs = [(a, name, target) for a in attacks for name, target in registry.items()]
+    total_pairs = len(pairs)
     rows: list[dict] = []
 
     with Progress(
@@ -280,8 +359,11 @@ def main() -> int:
         console=console,
     ) as progress:
         task = progress.add_task("running", total=len(pairs))
-        for attack, target_name, target in pairs:
-            progress.update(task, description=f"{attack['id']} → {target.name}")
+        for i, (attack, target_name, target) in enumerate(pairs, start=1):
+            progress.update(
+                task,
+                description=f"{target.name} | {attack['id']} | ({i}/{total_pairs} total)",
+            )
 
             t0 = time.monotonic()
             response = ""

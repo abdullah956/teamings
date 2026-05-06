@@ -41,6 +41,14 @@ class OpenAITarget(Target):
         super().__init__(model_name)
         self._client = openai.OpenAI()
 
+    @classmethod
+    def gpt4o_mini(cls) -> "OpenAITarget":
+        return cls("gpt-4o-mini")
+
+    @classmethod
+    def gpt35_turbo(cls) -> "OpenAITarget":
+        return cls("gpt-3.5-turbo")
+
     def query(self, prompt: str, system: str | None = None) -> str:
         messages: list[dict[str, str]] = []
         if system is not None:
