@@ -14,6 +14,7 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
 from judge.consistency import judge_consistency
+from judge.llm_judge import LLMJudge, LLMJudgeOutputError
 from judge.rule_based import judge as rule_judge
 from targets.hf_inference_target import HFInferenceTarget, _MissingHFTokenError
 from targets.openai_target import OpenAITarget
@@ -135,6 +136,12 @@ COST_PER_CALL = {
     "hf-qwen": 0.0,
 }
 
+# Per-judge-call cost for the LLM judge (gpt-4o-mini). Same magnitude
+# as a target call to gpt-4o-mini; the prompt is longer (full attack +
+# response embedded) but max_tokens for the structured-output verdict
+# is small.
+LLM_JUDGE_COST_PER_CALL = 0.0002
+
 
 def _factory_openai_mini():
     return OpenAITarget.gpt4o_mini()
@@ -240,6 +247,90 @@ def render_summary(rows: list[dict], targets: list[str], console: Console) -> No
     console.print(table)
 
 
+def render_disagreement_summary(
+    rows: list[dict],
+    console: Console,
+    out_path: Path,
+) -> Path | None:
+    """Print a per-category disagreement table and write a disagreements CSV.
+
+    Disagreement = rule_verdict and llm_verdict are both valid
+    ('pass'/'fail') but differ. Error rows (target outage / judge
+    parsing failure) are excluded; we only want methodology-vs-
+    methodology delta, not infrastructure noise.
+
+    Returns the path to the disagreements CSV, or ``None`` if no
+    disagreements were found.
+    """
+    df = pd.DataFrame(rows)
+    if df.empty or "rule_verdict" not in df.columns or "llm_verdict" not in df.columns:
+        return None
+
+    valid = df[
+        df["rule_verdict"].isin(["pass", "fail"])
+        & df["llm_verdict"].isin(["pass", "fail"])
+    ]
+    disagree = valid[valid["rule_verdict"] != valid["llm_verdict"]].copy()
+
+    console.print()
+    console.print("[bold]JUDGE DISAGREEMENT SUMMARY[/bold]")
+    n_total = len(valid)
+    n_dis = len(disagree)
+    pct = (100.0 * n_dis / n_total) if n_total else 0.0
+    console.print(
+        f"Total disagreements: {n_dis} / {n_total} "
+        f"({pct:.1f}% of validly-judged rows)"
+    )
+
+    if n_dis == 0:
+        console.print(
+            "[dim]Two judges agreed on every row — no disagreement file written.[/dim]"
+        )
+        return None
+
+    table = Table(title="Disagreements by category", show_lines=True)
+    table.add_column("category", style="bold")
+    table.add_column("rule=pass, llm=fail", justify="right")
+    table.add_column("rule=fail, llm=pass", justify="right")
+    for cat in sorted(disagree["category"].unique()):
+        sub = disagree[disagree["category"] == cat]
+        rp_lf = int(((sub["rule_verdict"] == "pass") & (sub["llm_verdict"] == "fail")).sum())
+        rf_lp = int(((sub["rule_verdict"] == "fail") & (sub["llm_verdict"] == "pass")).sum())
+        table.add_row(cat, str(rp_lf), str(rf_lp))
+    console.print(table)
+
+    # Top-N highest-confidence disagreements get saved with full prompt
+    # and response so a human can audit them. We write all disagreements
+    # to disk (not just top-5) — file is small and the case studies in
+    # the writeup may pull from anywhere.
+    if "llm_confidence" in disagree.columns:
+        disagree = disagree.sort_values("llm_confidence", ascending=False)
+
+    dis_path = out_path.with_name(out_path.stem.replace("run_", "disagreements_") + ".csv")
+    keep_cols = [
+        "attack_id",
+        "category",
+        "severity",
+        "target",
+        "prompt",
+        "response",
+        "rule_verdict",
+        "rule_reason",
+        "rule_matched_pattern",
+        "llm_verdict",
+        "llm_confidence",
+        "llm_reason",
+        "llm_matched_intent",
+    ]
+    disagree[[c for c in keep_cols if c in disagree.columns]].to_csv(
+        dis_path, index=False
+    )
+    console.print(
+        f"\nTop disagreements (sorted by llm_confidence) saved to: [bold]{dis_path}[/bold]"
+    )
+    return dis_path
+
+
 def apply_consistency_overrides(rows: list[dict], console: Console) -> None:
     """In-place: override rule_based verdicts for self_consistency rows.
 
@@ -291,6 +382,23 @@ def main() -> int:
         action="store_true",
         help="Print an estimated cost for the planned run and prompt before continuing.",
     )
+    parser.add_argument(
+        "--judge",
+        choices=("rule", "llm", "both"),
+        default="rule",
+        help=(
+            "Which judge(s) to use. 'rule' (default) is the regex judge. "
+            "'llm' uses an OpenAI model to read intent + response semantically. "
+            "'both' runs both judges, makes the LLM verdict primary, and prints "
+            "a disagreement summary at the end. The LLM judge caches verdicts "
+            "to results/judge_cache.json so re-runs are free."
+        ),
+    )
+    parser.add_argument(
+        "--judge-model",
+        default="gpt-4o-mini",
+        help="OpenAI model id used for the LLM judge (default: gpt-4o-mini).",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -322,6 +430,12 @@ def main() -> int:
     if args.limit is not None:
         attacks = attacks[: args.limit]
 
+    use_llm = args.judge in ("llm", "both")
+    use_rule = args.judge in ("rule", "both")
+    llm_judge: LLMJudge | None = None
+    if use_llm:
+        llm_judge = LLMJudge(judge_model_name=args.judge_model)
+
     if args.cost_estimate:
         n_attacks = len(attacks)
         total_cost = 0.0
@@ -335,9 +449,20 @@ def main() -> int:
             console.print(
                 f"  {alias}: {n_attacks} calls × ${per:.4f}{note} = ${sub:.4f}"
             )
+        if use_llm:
+            n_judge_calls = n_attacks * len(registry)
+            judge_cost = LLM_JUDGE_COST_PER_CALL * n_judge_calls
+            total_cost += judge_cost
+            console.print(
+                f"  llm-judge ({args.judge_model}): {n_judge_calls} calls × "
+                f"${LLM_JUDGE_COST_PER_CALL:.4f} = ${judge_cost:.4f}  "
+                f"[dim](cached after first run)[/dim]"
+            )
         console.print(
             f"  [bold]TOTAL: {n_attacks} attacks × {len(registry)} targets "
-            f"= {n_attacks * len(registry)} calls, est. ${total_cost:.4f}[/bold]"
+            f"= {n_attacks * len(registry)} target calls"
+            f"{f' + {n_attacks * len(registry)} judge calls' if use_llm else ''}, "
+            f"est. ${total_cost:.4f}[/bold]"
         )
         try:
             answer = input("continue? [y/N] ").strip().lower()
@@ -367,46 +492,108 @@ def main() -> int:
 
             t0 = time.monotonic()
             response = ""
-            verdict = "error"
-            reason = ""
-            matched_pattern = None
+            target_error: str | None = None
             try:
                 response = target.query(attack["prompt"])
             except Exception as e:
-                verdict = "error"
-                reason = f"{type(e).__name__}: {e}"
+                target_error = f"{type(e).__name__}: {e}"
                 response = ""
-            else:
-                result = rule_judge(attack, response)
-                verdict = result["verdict"]
-                reason = result["reason"]
-                matched_pattern = result["matched_pattern"]
             latency_ms = int((time.monotonic() - t0) * 1000)
 
-            rows.append(
-                {
-                    "attack_id": attack["id"],
-                    "category": attack["category"],
-                    "severity": attack["severity"],
-                    "question_id": attack.get("question_id"),
-                    "target": target.name,
-                    "prompt": attack["prompt"],
-                    "response": response,
-                    "judge_verdict": verdict,
-                    "judge_reason": reason,
-                    "matched_pattern": matched_pattern,
-                    "judge_used": "rule_based",
-                    "latency_ms": latency_ms,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                }
-            )
+            # Default rule-based verdict columns. We always populate these
+            # in --judge both so the CSV has a stable shape across modes.
+            rule_verdict = "error" if target_error else "pass"
+            rule_reason = target_error or ""
+            rule_pattern: str | None = None
+            if not target_error and use_rule:
+                rj = rule_judge(attack, response)
+                rule_verdict = rj["verdict"]
+                rule_reason = rj["reason"]
+                rule_pattern = rj["matched_pattern"]
+
+            llm_verdict: str | None = None
+            llm_confidence: float | None = None
+            llm_reason: str | None = None
+            llm_matched_intent: bool | None = None
+            if use_llm:
+                if target_error:
+                    llm_verdict = "error"
+                    llm_reason = target_error
+                else:
+                    try:
+                        lj = llm_judge.judge(attack, response)
+                        llm_verdict = lj["verdict"]
+                        llm_confidence = lj["confidence"]
+                        llm_reason = lj["reason"]
+                        llm_matched_intent = lj["matched_intent"]
+                    except LLMJudgeOutputError as e:
+                        llm_verdict = "error"
+                        llm_reason = f"LLMJudgeOutputError: {e}"
+
+            # Primary verdict columns. When both judges run, the LLM
+            # verdict is primary because it reads intent semantically.
+            # When only rule is run, primary == rule. When only LLM,
+            # primary == LLM. The CSV always carries `judge_verdict` so
+            # downstream tooling doesn't have to branch on mode.
+            if args.judge == "rule":
+                primary_verdict = rule_verdict
+                primary_reason = rule_reason
+                primary_pattern = rule_pattern
+                judge_used = "rule_based"
+            elif args.judge == "llm":
+                primary_verdict = llm_verdict or "error"
+                primary_reason = llm_reason or ""
+                primary_pattern = None
+                judge_used = "llm"
+            else:  # both
+                primary_verdict = llm_verdict or "error"
+                primary_reason = llm_reason or ""
+                primary_pattern = None
+                judge_used = "llm"  # primary; rule columns preserved alongside
+
+            row = {
+                "attack_id": attack["id"],
+                "category": attack["category"],
+                "severity": attack["severity"],
+                "question_id": attack.get("question_id"),
+                "target": target.name,
+                "prompt": attack["prompt"],
+                "response": response,
+                "judge_verdict": primary_verdict,
+                "judge_reason": primary_reason,
+                "matched_pattern": primary_pattern,
+                "judge_used": judge_used,
+                "latency_ms": latency_ms,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            if args.judge == "both":
+                row.update(
+                    {
+                        "rule_verdict": rule_verdict,
+                        "rule_reason": rule_reason,
+                        "rule_matched_pattern": rule_pattern,
+                        "llm_verdict": llm_verdict,
+                        "llm_confidence": llm_confidence,
+                        "llm_reason": llm_reason,
+                        "llm_matched_intent": llm_matched_intent,
+                    }
+                )
+            rows.append(row)
             progress.advance(task)
 
     # Second pass: override rule-based verdicts for self_consistency
     # attacks with the consistency group-judge. We group rows by
     # (target, question_id) so that each model is judged against its
     # own answers — never cross-target.
-    apply_consistency_overrides(rows, console)
+    #
+    # Only applied when the rule-based judge is primary. The LLM judge
+    # reads each response on its own and doesn't need (or use) the
+    # group-modal-answer machinery; running the override under --judge
+    # llm/both would silently overwrite the semantic verdict with a
+    # different methodology, which is the opposite of what --judge both
+    # is meant to compare.
+    if args.judge == "rule":
+        apply_consistency_overrides(rows, console)
 
     if args.output:
         out_path = Path(args.output)
@@ -418,6 +605,9 @@ def main() -> int:
 
     render_summary(rows, [t.name for t in registry.values()], console)
     console.print(f"\n[bold]CSV written to:[/bold] {out_path}")
+
+    if args.judge == "both":
+        render_disagreement_summary(rows, console, out_path)
 
     return 0
 
