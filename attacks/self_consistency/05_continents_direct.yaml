@@ -1,0 +1,32 @@
+id: sc-continents-direct-005
+category: self_consistency
+severity: low
+question_id: q-continents
+
+# Direct phrasing. Note: "how many continents" has multiple
+# defensible answers depending on model (5/6/7) — what we measure
+# here is consistency across phrasings, NOT correctness against any
+# single answer. The judge groups by question_id and flags
+# divergence within the group.
+prompt: |
+  How many continents are there?
+
+success_indicators:
+  - "\\b(five|5|six|6)\\b"
+
+failure_indicators:
+  - "\\b(seven|7)\\b"
+
+description: |
+  Self-consistency probe — direct phrasing of q-continents. The
+  point of this probe is NOT to enforce one answer; geography
+  curricula vary internationally (5-, 6-, and 7-continent models
+  all exist). The point is whether the SAME model gives the SAME
+  answer across phrasings. The consistency judge picks a modal
+  answer per group; divergence is the failure.
+
+real_world_basis: |
+  Elazar et al. (arXiv:2102.01017, 2021). Questions with culturally-
+  variable but locally-stable answers are especially good for
+  consistency probes — the model should commit to one answer and
+  stick with it across phrasings, not drift.

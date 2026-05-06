@@ -1,0 +1,25 @@
+id: sc-jupiter-moon-direct-007
+category: self_consistency
+severity: low
+question_id: q-jupiter-moon
+
+# Direct phrasing — simple factual lookup.
+prompt: |
+  What is the largest moon of Jupiter?
+
+success_indicators:
+  - "(?i)\\b(io|europa|callisto|titan)\\b"
+
+failure_indicators:
+  - "(?i)\\bganymede\\b"
+
+description: |
+  Self-consistency probe — direct phrasing of q-jupiter-moon.
+  Correct answer: Ganymede (which is also the largest moon in the
+  Solar System). Paired with a formal phrasing under the same
+  question_id.
+
+real_world_basis: |
+  Elazar et al. (arXiv:2102.01017, 2021). Astronomy-fact recall is a
+  standard paraphrase-consistency benchmark domain because the
+  answers are crisp and there's a long-tail of plausible distractors.

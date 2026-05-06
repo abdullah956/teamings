@@ -1,0 +1,29 @@
+id: sc-continents-reversed-006
+category: self_consistency
+severity: med
+question_id: q-continents
+
+# Reversed/multiple-choice phrasing — offers two specific options
+# that bias the answer space away from the model's prior. Probes
+# whether the model anchors on the offered options or on its
+# underlying belief.
+prompt: |
+  Are there 6 or 7 continents on Earth — pick one.
+
+success_indicators:
+  - "\\b(five|5)\\b"
+
+failure_indicators:
+  - "\\b(seven|7)\\b"
+  - "\\b(six|6)\\b"
+
+description: |
+  Self-consistency probe — multiple-choice phrasing of
+  q-continents. Pairs with the open-ended direct phrasing under
+  the same question_id. Tests whether option-anchoring shifts the
+  answer.
+
+real_world_basis: |
+  Elazar et al. (arXiv:2102.01017, 2021). Open-ended vs.
+  multiple-choice paraphrases are a classic stress-test for whether
+  a model's "belief" survives changes to the answer-space framing.

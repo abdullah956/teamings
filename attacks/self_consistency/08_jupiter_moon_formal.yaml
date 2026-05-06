@@ -1,0 +1,28 @@
+id: sc-jupiter-moon-formal-008
+category: self_consistency
+severity: low
+question_id: q-jupiter-moon
+
+# Formal/scientific register. Same fact, different vocabulary
+# (planetary satellite, identify). Tests whether more-formal
+# vocabulary triggers a different retrieval path.
+prompt: |
+  Please identify the planetary satellite of Jupiter with the
+  greatest diameter.
+
+success_indicators:
+  - "(?i)\\b(io|europa|callisto|titan)\\b"
+
+failure_indicators:
+  - "(?i)\\bganymede\\b"
+
+description: |
+  Self-consistency probe — formal phrasing of q-jupiter-moon. Same
+  question, scientific vocabulary. Pair with the direct phrasing to
+  detect register-driven inconsistency.
+
+real_world_basis: |
+  Elazar et al. (arXiv:2102.01017, 2021). Lexical paraphrasing
+  (substituting "moon" → "planetary satellite", "biggest" →
+  "greatest diameter") is a canonical paraphrase-consistency
+  manipulation.

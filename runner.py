@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
+from judge.consistency import judge_consistency
 from judge.rule_based import judge as rule_judge
 from targets.openai_target import OpenAITarget
 
@@ -27,6 +28,9 @@ REQUIRED_FIELDS = (
     "description",
     "real_world_basis",
 )
+# Categories that require a question_id to be useful for the consistency
+# group-judge. Missing question_id on these is a load-time skip.
+REQUIRES_QUESTION_ID = {"self_consistency"}
 ALLOWED_SEVERITY = {"low", "med", "high"}
 
 # Attack ids matching these prefixes are documentation/examples and
@@ -72,6 +76,13 @@ def load_attacks(attacks_dir: Path, categories: list[str], console: Console) -> 
             continue
 
         if isinstance(attack.get("id"), str) and attack["id"].startswith(EXAMPLE_ID_PREFIXES):
+            continue
+
+        if attack["category"] in REQUIRES_QUESTION_ID and not attack.get("question_id"):
+            console.print(
+                f"[yellow]skip {path}: category {attack['category']!r} requires "
+                f"a non-empty question_id field[/yellow]"
+            )
             continue
 
         if attack["severity"] not in ALLOWED_SEVERITY:
@@ -185,6 +196,44 @@ def render_summary(rows: list[dict], targets: list[str], console: Console) -> No
     console.print(table)
 
 
+def apply_consistency_overrides(rows: list[dict], console: Console) -> None:
+    """In-place: override rule_based verdicts for self_consistency rows.
+
+    Groups rows by (target, question_id) and runs ``judge_consistency``
+    over each group. The CSV's ``judge_verdict`` / ``judge_reason`` /
+    ``matched_pattern`` are replaced with the group-judge result, and
+    ``judge_used`` is flipped to "consistency" so the override is
+    auditable.
+
+    Rows for other categories are left untouched.
+    """
+    groups: dict[tuple[str, str], list[int]] = {}
+    for i, row in enumerate(rows):
+        if row.get("category") != "self_consistency":
+            continue
+        qid = row.get("question_id")
+        if not qid:
+            # Should be impossible because load_attacks enforces
+            # question_id for this category, but guard anyway.
+            continue
+        groups.setdefault((row["target"], qid), []).append(i)
+
+    for (target, qid), idxs in groups.items():
+        # Build minimal attack-shaped dicts for the judge — only the id is read
+        attacks = [{"id": rows[i]["attack_id"]} for i in idxs]
+        responses = [rows[i].get("response") or "" for i in idxs]
+        results = judge_consistency(attacks, responses)
+        for idx, result in zip(idxs, results):
+            rows[idx]["judge_verdict"] = result["verdict"]
+            rows[idx]["judge_reason"] = result["reason"]
+            rows[idx]["matched_pattern"] = result["matched_pattern"]
+            rows[idx]["judge_used"] = "consistency"
+        console.print(
+            f"[dim]consistency override: target={target} question_id={qid} "
+            f"group_size={len(idxs)}[/dim]"
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="LLM red-team harness runner")
     parser.add_argument("--attacks-dir", default="./attacks")
@@ -257,17 +306,25 @@ def main() -> int:
                     "attack_id": attack["id"],
                     "category": attack["category"],
                     "severity": attack["severity"],
+                    "question_id": attack.get("question_id"),
                     "target": target.name,
                     "prompt": attack["prompt"],
                     "response": response,
                     "judge_verdict": verdict,
                     "judge_reason": reason,
                     "matched_pattern": matched_pattern,
+                    "judge_used": "rule_based",
                     "latency_ms": latency_ms,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             )
             progress.advance(task)
+
+    # Second pass: override rule-based verdicts for self_consistency
+    # attacks with the consistency group-judge. We group rows by
+    # (target, question_id) so that each model is judged against its
+    # own answers — never cross-target.
+    apply_consistency_overrides(rows, console)
 
     if args.output:
         out_path = Path(args.output)

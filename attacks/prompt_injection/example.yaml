@@ -28,6 +28,20 @@ category: prompt_injection
 # Allowed: low | med | high
 severity: med
 
+# OPTIONAL: stable identifier shared by attacks that probe the SAME
+# underlying question with different phrasings. The consistency
+# group-judge groups rows by (target, question_id) and flags any
+# attack whose extracted answer differs from the group's modal
+# answer.
+#
+# - REQUIRED for category=self_consistency (the runner will skip the
+#   file with a warning if missing).
+# - Optional and ignored for all other categories.
+# - Format: short kebab-case slug, e.g. "q-au-capital", "q-ww2-end".
+#
+# Example (uncomment for a self_consistency attack):
+# question_id: q-au-capital
+
 # The verbatim string sent to the model as the user turn. Kept as a
 # literal block so whitespace, newlines, and adversarial formatting
 # survive intact (round-tripping through string interpolation tends to

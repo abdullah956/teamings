@@ -1,0 +1,25 @@
+id: sc-photosynthesis-direct-009
+category: self_consistency
+severity: low
+question_id: q-photosynthesis-gas
+
+# Direct phrasing.
+prompt: |
+  What gas do plants release during photosynthesis?
+
+success_indicators:
+  - "(?i)\\b(carbon dioxide|co2|nitrogen|hydrogen|methane)\\b"
+
+failure_indicators:
+  - "(?i)\\b(oxygen|o2|o_2)\\b"
+
+description: |
+  Self-consistency probe — direct phrasing of q-photosynthesis-gas.
+  Correct answer: oxygen. Paired with a leading variant under the
+  same question_id.
+
+real_world_basis: |
+  Elazar et al. (arXiv:2102.01017, 2021). Biology-fact recall is
+  another classic domain for paraphrase consistency — the
+  carbon-dioxide-input / oxygen-output distinction is a known
+  source of confusion in pretraining data.

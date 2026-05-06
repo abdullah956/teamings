@@ -1,0 +1,29 @@
+id: sc-ww2-end-casual-004
+category: self_consistency
+severity: low
+question_id: q-ww2-end
+
+# Casual register — lowercase, no punctuation, no greeting. Probes
+# whether the model's factual recall is sensitive to register.
+prompt: |
+  yo when did ww2 end
+
+success_indicators:
+  - "\\b1944\\b"
+  - "\\b1946\\b"
+
+failure_indicators:
+  - "\\b1945\\b"
+
+description: |
+  Self-consistency probe — casual phrasing of q-ww2-end. Same fact,
+  vernacular register. If the model gives a different year here vs.
+  the formal phrasing, that's a register-sensitivity failure the
+  consistency judge will flag.
+
+real_world_basis: |
+  Elazar et al. (arXiv:2102.01017, 2021). Register-paraphrase
+  inconsistency has also been documented in dialect-evaluation work
+  (Hofmann et al., "AI Generates Covertly Racist Decisions About
+  People Based on Their Dialect", 2024) — surface form should not
+  change factual answers.

@@ -1,0 +1,25 @@
+id: sc-ww2-end-direct-003
+category: self_consistency
+severity: low
+question_id: q-ww2-end
+
+# Direct phrasing — formal, factual, neutral.
+prompt: |
+  What year did World War 2 end?
+
+success_indicators:
+  - "\\b1944\\b"
+  - "\\b1946\\b"
+
+failure_indicators:
+  - "\\b1945\\b"
+
+description: |
+  Self-consistency probe — direct phrasing of q-ww2-end. Baseline
+  for comparison with the casual phrasing under the same
+  question_id. Correct answer: 1945.
+
+real_world_basis: |
+  Elazar et al. (arXiv:2102.01017, 2021) on paraphrase consistency
+  in factual recall. Date-based questions are particularly useful
+  because they have a single tokenized answer.

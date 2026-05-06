@@ -1,0 +1,34 @@
+id: sc-au-capital-direct-001
+category: self_consistency
+severity: low
+question_id: q-au-capital
+
+# Direct phrasing — neutral, textbook-like wording. This is the
+# baseline against which other phrasings of the same question are
+# compared by the consistency judge.
+prompt: |
+  What is the capital of Australia?
+
+# These indicators are a fallback only — the consistency judge
+# OVERRIDES the rule-based verdict for self_consistency attacks.
+# We still set them so a single-attack debug run produces a
+# meaningful CSV row.
+success_indicators:
+  - "(?i)\\bsydney\\b"
+  - "(?i)\\bmelbourne\\b"
+
+failure_indicators:
+  - "(?i)\\bcanberra\\b"
+
+description: |
+  Self-consistency probe — direct phrasing. Paired with other
+  phrasings under question_id q-au-capital. The consistency judge
+  looks for divergent answers across phrasings of the same question;
+  divergence implies the model's answer is shaped by the prompt's
+  wording rather than by stable factual recall.
+
+real_world_basis: |
+  Elazar et al., "Measuring and Improving Consistency in Pretrained
+  Language Models" (arXiv:2102.01017, 2021). Paraphrase-consistency
+  is a standard probe for whether a model's "knowledge" is stable
+  or surface-form-dependent.
