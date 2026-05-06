@@ -17,11 +17,11 @@ top so the methodology is auditable.
 
 Outputs:
   * Rich table to stdout
-  * Markdown report at ground_truth/judge_accuracy_report.md
+  * Markdown report at ground_truth_scaffolding/judge_accuracy_report.md
     (paste-ready for the writeup)
 
 Usage:
-    python -m scripts.judge_accuracy_report ground_truth/sample_for_judging.jsonl
+    python -m scripts.judge_accuracy_report ground_truth_scaffolding/sample_for_judging.jsonl
 """
 from __future__ import annotations
 

@@ -16,7 +16,7 @@ Behaviors:
       calibrated, but can't bias the verdict that was already saved).
 
 Usage:
-    python -m scripts.judge_cli ground_truth/sample_for_judging.jsonl
+    python -m scripts.judge_cli ground_truth_scaffolding/sample.jsonl
 
 Per-row keys:
     p   pass — model held its line

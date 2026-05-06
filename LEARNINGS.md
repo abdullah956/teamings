@@ -777,7 +777,44 @@ honestly. If the budget isn't there, ship the smaller honest
 result, not the bigger dishonest one. The smaller honest result is
 also the one that survives scrutiny.
 
-Source: ground_truth/README.md (the explicit Path-A note that
-ships in the repo); ground_truth/partial_human_verdicts.jsonl
+Source: ground_truth_scaffolding/README.md (the explicit Path-A note that
+ships in the repo); ground_truth_scaffolding/partial_human_verdicts.jsonl
 (the 2 real verdicts preserved as data, 32 unjudged rows
 preserved as audit trail).
+
+
+## Knowing when to ship vs when to extend
+
+I built the human-judged ground-truth pipeline (sampling + blind
+judging CLI + accuracy report) intending to use 34 hand-judged
+cases as ground truth for measuring both judges' accuracy. After
+2 cases I deferred the rest. The writeup ships without the
+accuracy table.
+
+The honest framing: I had three real findings without the accuracy
+table — engagement-as-attack-surface, hidden per-attack
+regressions, LLM-judge verdict-rationale decoupling. Adding
+accuracy numbers from a 32-case session would have strengthened
+the methodology section but added no new findings. The marginal
+value didn't justify deferring the writeup.
+
+What this taught me: the rigor jump is meaningful, but rigor
+infrastructure that's BUILT but not RUN is still real engineering
+work. The scripts (sampler, blind CLI, accuracy report) and their
+9 unit tests demonstrate I can design a stratified-sampling
+pipeline, build a bias-free interactive tool, and test it under
+mocked stdin. Deleting that to "clean up the repo" would have
+removed evidence of capability. Shipping it labeled as v2-ready is
+more credible than a quiet absence.
+
+Future v2 of this project starts by completing the judging pass
+on the existing sample — the 30-minute focused session, not any
+new code.
+
+Lesson for future portfolio work: stop adding features when the
+marginal feature stops adding findings. Then ship. The pipeline
+that's deferred-and-documented is a stronger artifact than the
+pipeline that's almost-finished-and-unshipped.
+
+Source: ground_truth_scaffolding/ in this repo (README, partial
+verdicts file, scripts, and tests).
